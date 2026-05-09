@@ -1,0 +1,429 @@
+<script>
+    window.currentActiveSheet = ""; // ตัวแปรเก็บว่าตอนนี้ผู้ใช้อยู่โมดูล (Sheet) ไหน
+    window.uiStateDynamic = {}; // เก็บสถานะการเปิด/ปิดแถว ของทุกโมดูล
+    window.currentDynamicData = []; 
+
+    window.uiState02 = { years: {}, customers: {}, sessions: {} };
+    window.currentData02 = null; 
+    const docTypesList = [ "1. Plant Tour information", "2. Audit Time Table", "3. Audit Preparation Material", "4. Audit Report (Customer)", "5. Audit Report (Internal)" ];
+
+    document.addEventListener("DOMContentLoaded", function() {
+        initTinyMCE();
+        loadSystemModules(); // 🌟 โหลดเมนูทั้งหมดเมื่อเปิดหน้าเว็บ
+    });
+
+    // ==========================================
+    // 🌟 ระบบสร้างและโหลด MENU แบบ DYNAMIC
+    // ==========================================
+    function loadSystemModules() {
+        google.script.run.withSuccessHandler(renderMainMenu).getSystemModules();
+    }
+
+    function renderMainMenu(modules) {
+        var grid = document.getElementById('menuGrid');
+        var html = '';
+        
+        // เรนเดอร์โมดูลที่สร้างแบบ Dynamic ทั้งหมด (รวมถึง 01 และ 03)
+        modules.forEach(m => {
+            var mName = m[1], mIcon = m[2];
+            html += `
+            <div class="col-md-4">
+                <div class="card menu-card h-100 text-center p-4 border-info" onclick="openDynamicPage('${mName}', '${mIcon}')">
+                    <i class="bi ${mIcon} icon-large text-info"></i><h5 class="fw-bold text-info">${mName}</h5><small class="text-muted">Dynamic Document</small>
+                </div>
+            </div>`;
+        });
+
+        // เรนเดอร์ 02 Audit Result (ระบบอัปโหลดไฟล์ที่ถูกล็อกตายตัวไว้)
+        html += `
+        <div class="col-md-4">
+            <div class="card menu-card h-100 text-center p-4 border-corporate" onclick="openPage('auditResultPage')">
+                <i class="bi bi-folder-check icon-large text-corporate"></i><h5 class="fw-bold text-corporate">02 Audit Result</h5><small class="text-muted">Upload External Files</small>
+            </div>
+        </div>`;
+
+        // ปุ่มสร้างโมดูลใหม่
+        html += `
+        <div class="col-md-4">
+            <div class="card border-dashed h-100 text-center p-4" onclick="new bootstrap.Modal(document.getElementById('addModuleModal')).show();">
+                <i class="bi bi-plus-circle icon-large text-secondary"></i><h5 class="fw-bold text-secondary">Add New Module</h5><small class="text-muted">Create new data structure</small>
+            </div>
+        </div>`;
+
+        grid.innerHTML = html;
+    }
+
+    function executeCreateModule() {
+        var mName = document.getElementById('newModuleName').value.trim();
+        var mIcon = document.getElementById('newModuleIcon').value;
+        if(mName === "") return alert("กรุณาใส่ชื่อโมดูล");
+        
+        var btn = document.getElementById('btnCreateModule');
+        btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Creating...'; btn.disabled = true;
+        showToast("กำลังสร้างตารางข้อมูลหลังบ้าน...", "bg-dark");
+
+        google.script.run.withSuccessHandler(msg => {
+            bootstrap.Modal.getInstance(document.getElementById('addModuleModal')).hide();
+            document.getElementById('newModuleName').value = "";
+            btn.innerHTML = 'Create Module'; btn.disabled = false;
+            showToast(msg, "bg-success");
+            loadSystemModules(); // รีโหลดเมนูใหม่
+        }).createNewModule(mName, mIcon);
+    }
+
+    // ==========================================
+    // 🌟 ระบบแสดงผลหน้า DYNAMIC (ใช้โครงสร้างเดียว วนใช้ทุก Sheet)
+    // ==========================================
+    function openDynamicPage(sheetName, iconClass) {
+        window.currentActiveSheet = sheetName;
+        document.getElementById('dynPageTitle').innerHTML = `<i class="bi ${iconClass}"></i> ${sheetName}`;
+        openPage('dynamicModulePage');
+        loadDynamicData();
+    }
+
+    function loadDynamicData() {
+        var tbody = document.getElementById('tableBody_Dynamic');
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-5 text-muted"><i class="bi bi-arrow-repeat spin fs-2"></i><br>Loading data...</td></tr>`;
+        google.script.run.withSuccessHandler(data => { window.currentDynamicData = data; renderDynamicTable(data); }).getDynamicData(window.currentActiveSheet);
+    }
+
+    // 🌟 แก้ไข: ถ้าเปิดมาครั้งแรก undefined ต้องถูกปิดไว้ (=== true)
+    function isExpDynamic(sheetName, key) { 
+        if(!window.uiStateDynamic[sheetName]) window.uiStateDynamic[sheetName] = { sessions: {} };
+        return window.uiStateDynamic[sheetName].sessions[key] === true; 
+    }
+    function togDynamic(key) { 
+        var sheetName = window.currentActiveSheet;
+        if(!window.uiStateDynamic[sheetName]) window.uiStateDynamic[sheetName] = { sessions: {} };
+        window.uiStateDynamic[sheetName].sessions[key] = !isExpDynamic(sheetName, key); 
+        renderDynamicTable(window.currentDynamicData); 
+    }
+
+    function renderDynamicTable(data) {
+        var tbody = document.getElementById('tableBody_Dynamic');
+        var sheetName = window.currentActiveSheet;
+        if (!data || data.length === 0) { tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-5"><i class="bi bi-inbox fs-1"></i><br><strong>No Documents in ${sheetName}</strong></td></tr>`; return; }
+        
+        var tree = {}; var rootNodes = [];
+        data.forEach(function(row) {
+            var ts=row[0], year=row[1], cust=row[2], aId=row[3], title=row[4], content=row[5], by=row[6], rName=row[7], status=row[8], pId=row[9];
+            if (!aId) return;
+            var node = { aId, title, content, by, rName, status, ts, children: [] };
+            if (!pId || pId.trim() === "") { rootNodes.push(node); } else { if (!tree[pId]) tree[pId] = []; tree[pId].push(node); }
+        });
+        function attachChildren(nodes) { nodes.forEach(node => { if (tree[node.aId]) { node.children = tree[node.aId]; attachChildren(node.children); } }); }
+        attachChildren(rootNodes);
+        
+        var html = '';
+        function buildTreeHtml(nodes, level) {
+            nodes.forEach(node => {
+                var padding = 20 + (level * 40); var hasChildren = node.children.length > 0;
+                var isExpanded = isExpDynamic(sheetName, node.aId); 
+                var icon = hasChildren ? (isExpanded ? 'chevron-down text-dark fw-bold' : 'chevron-right text-dark fw-bold') : 'dash text-muted';
+                var isCompleted = node.status === "Completed" && node.content !== "";
+                var statusBadge = isCompleted ? `<span class="badge bg-success"><i class="bi bi-check-circle"></i> Completed</span>` : `<span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split"></i> Draft</span>`;
+                var safeContent = isCompleted ? encodeURIComponent(node.content) : "";
+                var bgClass = level === 0 ? 'bg-light' : '';
+
+                html += `
+                <tr class="row-document hover-highlight ${bgClass}" onclick="if(${hasChildren}) { togDynamic('${node.aId}'); }">
+                    <td class="text-start" style="padding-left: ${padding}px; border-left: ${level > 0 ? '2px dashed #dee2e6' : 'none'};">
+                        <span style="cursor: ${hasChildren ? 'pointer' : 'default'}"><i class="bi bi-${icon} me-2"></i></span>
+                        <i class="bi bi-file-earmark-richtext text-info fs-5 align-middle me-1"></i> 
+                        <strong class="text-dark fs-6">${node.title}</strong>
+                        <button class="btn btn-sm btn-link text-secondary p-0 ms-2" onclick="event.stopPropagation(); editDynamicTitle('${node.aId}', '${node.title}')"><i class="bi bi-pencil"></i></button>
+                        <br><small class="text-muted" style="margin-left: 35px;"><i class="bi bi-person text-secondary"></i> ${node.rName || '-'}</small>
+                    </td>
+                    <td class="text-center align-middle">${statusBadge}</td>
+                    <td class="text-center align-middle" style="font-size: 0.85em; color: #6c757d;">${node.ts || '-'}<br>${node.by}</td>
+                    <td class="text-center align-middle">
+                        <button class="btn btn-sm btn-outline-success me-1 shadow-sm" onclick="event.stopPropagation(); openAddSessionModal('${sheetName}', '${node.aId}')"><i class="bi bi-plus-circle"></i> Sub</button>
+                        ${isCompleted ? `<button class="btn btn-outline-primary btn-sm me-1 shadow-sm" onclick="event.stopPropagation(); viewDocument('${node.title.replace(/'/g, "\\'")}', '${safeContent}')"><i class="bi bi-eye"></i> View</button>` : ''}
+                        <button class="btn btn-info btn-sm text-white fw-bold shadow-sm" onclick="event.stopPropagation(); openEditor('${sheetName}', '${node.aId}', '${node.title}', '${safeContent}')"><i class="bi bi-pencil-square"></i> Edit</button>
+                        <button class="btn btn-outline-danger btn-sm ms-1 shadow-sm" onclick="event.stopPropagation(); deleteSess('${sheetName}', '${node.aId}')"><i class="bi bi-trash"></i></button>
+                    </td>
+                </tr>`;
+                if (hasChildren && isExpanded) { buildTreeHtml(node.children, level + 1); }
+            });
+        }
+        if (rootNodes.length > 0) { buildTreeHtml(rootNodes, 0); } else { html = `<tr><td colspan="4" class="text-center text-muted py-5"><i class="bi bi-inbox fs-1"></i><br><strong>No Documents</strong></td></tr>`; }
+        tbody.innerHTML = html;
+    }
+
+    function editDynamicTitle(aId, oldTitle) {
+        var newTitle = prompt("Enter new document title:", oldTitle);
+        if (newTitle && newTitle !== oldTitle) { showToast("Updating title...", "bg-dark"); google.script.run.withSuccessHandler(msg => { showToast(msg, "bg-success"); loadDynamicData(); }).renameDynamicDocTitle(window.currentActiveSheet, aId, newTitle); }
+    }
+
+    // ==========================================
+    // 🌟 ระบบ EDITOR (TinyMCE) & VIEWER
+    // ==========================================
+    function openEditor(sheetName, aId, title, safeContentStr) {
+        document.getElementById('editDocMode').value = sheetName; // เก็บชื่อชีตเป็นโหมด
+        document.getElementById('editDocAuditId').value = aId;
+        document.getElementById('editorDocTitleDisplay').innerText = title;
+        var htmlContent = safeContentStr ? decodeURIComponent(safeContentStr) : "";
+        var editor = tinymce.get('tinymce-editor');
+        if (editor) { editor.setContent(htmlContent); editor.undoManager.clear(); }
+        new bootstrap.Modal(document.getElementById('editorModal')).show();
+    }
+    
+    function saveRichDocument() {
+        var sheetName = document.getElementById('editDocMode').value;
+        var aId = document.getElementById('editDocAuditId').value;
+        var contentHTML = tinymce.get('tinymce-editor').getContent(); 
+        var textOnly = contentHTML.replace(/<[^>]*>?/gm, '').trim();
+        var hasImage = contentHTML.includes('<img');
+        if(textOnly === "" && !hasImage) return alert("Document is empty!");
+
+        var btn = document.getElementById('btnSaveRichDoc');
+        btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Saving...'; btn.disabled = true;
+        showToast("Saving document...", "bg-dark");
+        
+        google.script.run.withSuccessHandler(msg => {
+            bootstrap.Modal.getInstance(document.getElementById('editorModal')).hide();
+            btn.innerHTML = '<i class="bi bi-save"></i> Save Document'; btn.disabled = false;
+            showToast(msg, "bg-success"); loadDynamicData();
+        }).withFailureHandler(err => {
+            btn.innerHTML = '<i class="bi bi-save"></i> Save Document'; btn.disabled = false;
+            alert("Failed to save:\n" + err.message);
+        }).saveDynamicDocContent(sheetName, aId, contentHTML);
+    }
+
+    window.currentViewTitle = "Exported_Document"; 
+    function viewDocument(docTitle, safeContentStr) {
+        window.currentViewTitle = docTitle || "Audit_Document";
+        document.getElementById('docViewer').innerHTML = decodeURIComponent(safeContentStr); 
+        new bootstrap.Modal(document.getElementById('viewDocModal')).show();
+    }
+
+    // ==========================================
+    // 🌟 RENDER 02 (Audit Result - อัปโหลดไฟล์)
+    // ==========================================
+    function isExp(stateObj, key) { return stateObj[key] === true; }
+    function tog(type, key) { window.uiState02[type][key] = !isExp(window.uiState02[type], key); renderTable02(window.currentData02); }
+
+    function loadData02() { google.script.run.withSuccessHandler(data => { window.currentData02 = data; renderTable02(data); }).getAuditData(); }
+    function renderTable02(data) {
+        var tbody = document.getElementById('tableBody_02'); var groupedData = {};
+        if (data && data.length > 0) {
+            data.forEach(function(row) {
+                var ts=row[0], year=row[1], cust=row[2], aId=row[3], doc=row[4], fName=row[5], fLink=row[6], by=row[7], rName=row[8], detail=row[9];
+                if (!year || !cust || !aId) return; 
+                if (!groupedData[year]) groupedData[year] = {}; if (!groupedData[year][cust]) groupedData[year][cust] = {};
+                if (!groupedData[year][cust][aId]) { groupedData[year][cust][aId] = { lastEdit: ts, contactName: rName, docs: {} }; docTypesList.forEach(dt => groupedData[year][cust][aId].docs[dt] = []); }
+                if(fName && fLink && doc) groupedData[year][cust][aId].docs[doc].push({ fileName: fName, fileLink: fLink, timestamp: ts, actionBy: by, fileDetail: detail });
+            });
+        }
+        var years = Object.keys(groupedData).sort((a, b) => parseInt(a) - parseInt(b));
+        if (years.length === 0) { tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-5"><i class="bi bi-inbox fs-1"></i><br><strong>No Upload Data</strong></td></tr>`; return; }
+
+        var html = '';
+        years.forEach(function(year) {
+            let isYOpen = isExp(window.uiState02.years, year);
+            html += `<tr class="row-year" onclick="tog('years', '${year}')"><td colspan="4" class="ps-3"><i class="bi bi-chevron-${isYOpen?'down':'right'}"></i> &nbsp; Year ${year}</td></tr>`;
+            if(isYOpen) {
+                var customers = Object.keys(groupedData[year]).sort();
+                customers.forEach(function(cust) {
+                    let custKey = year + '_' + cust; let isCOpen = isExp(window.uiState02.customers, custKey);
+                    var contactName = Object.keys(groupedData[year][cust])[0] ? groupedData[year][cust][Object.keys(groupedData[year][cust])[0]].contactName : '-';
+                    html += `<tr class="row-customer" onclick="tog('customers', '${custKey}')"><td colspan="4" class="ps-4"><div class="d-flex justify-content-between align-items-center"><span><i class="bi bi-chevron-${isCOpen?'down':'right'}"></i> &nbsp; <i class="bi bi-building"></i> Customer: ${cust} <span class="text-secondary ms-2 fw-normal" style="font-size: 0.85em;">(Contact: ${contactName || '-'})</span></span><div><button class="btn btn-sm btn-outline-secondary me-1" onclick="event.stopPropagation(); openEditCustomerModal('${cust}')"><i class="bi bi-pencil-square"></i> Edit Name</button></div></div></td></tr>`;
+                    if(isCOpen) {
+                        var auditIds = Object.keys(groupedData[year][cust]).sort().reverse();
+                        auditIds.forEach(function(aId) {
+                            let isSOpen = isExp(window.uiState02.sessions, aId);
+                            var sessData = groupedData[year][cust][aId];
+                            var lastActive = sessData.lastEdit ? sessData.lastEdit : '-'; var justDate = lastActive !== '-' ? lastActive.split(' ')[0] : '-';
+                            html += `<tr class="row-audit-tag" onclick="tog('sessions', '${aId}')"><td colspan="3" class="ps-5"><div class="d-flex flex-column py-2"><span><i class="bi bi-chevron-${isSOpen?'down':'right'} fw-bold"></i> &nbsp; <i class="bi bi-building text-corporate"></i> <strong>${cust}</strong> <span class="text-muted ms-2" style="font-size: 0.9em;"><i class="bi bi-calendar-event"></i> Date: ${justDate}</span></span></div></td><td class="text-center align-middle"><button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteSess('02', '${aId}')"><i class="bi bi-trash"></i></button></td></tr>`;
+                            if(isSOpen) {
+                                docTypesList.forEach(function(dt) {
+                                    var files = sessData.docs[dt] || [];
+                                    html += `<tr class="row-document"><td colspan="3" class="ps-5 fw-bold text-dark" style="padding-left: 5rem !important;"><i class="bi bi-folder2-open text-corporate"></i> ${dt}</td><td class="text-center"><button class="btn btn-sm btn-outline-corporate fw-bold" onclick="event.stopPropagation(); openUploadModal('${year}', '${cust}', '${aId}', '${dt}')"><i class="bi bi-upload"></i> Upload</button></td></tr>`;
+                                    if (files.length === 0) { html += `<tr class="text-center row-document"><td colspan="4" class="text-secondary small py-2">- No file -</td></tr>`; } 
+                                    else {
+                                        files.forEach(function(f) {
+                                            var dateDisplay = f.timestamp ? f.timestamp : '-'; var escapedDetail = f.fileDetail ? f.fileDetail.replace(/'/g, "\\'") : '';
+                                            html += `<tr class="text-center row-document"><td class="text-start" style="padding-left: 6.5rem !important; width: 40%;"><span class="text-dark small">${f.fileDetail || '-'}</span> <button class="btn btn-link btn-sm p-0 ms-2 text-secondary" onclick="event.stopPropagation(); openEditDetailModal('${aId}', '${dt}', '${f.fileLink}', '${escapedDetail}')" title="Edit Detail"><i class="bi bi-pencil-square"></i></button></td><td><span onclick="window.open('${f.fileLink}', '_blank')" class="file-link" style="cursor: pointer;" title="Click to view document"><i class="bi bi-file-earmark-check text-success"></i> ${f.fileName}</span></td><td style="font-size: 0.85em; color: #6c757d;">${dateDisplay}<br><i class="bi bi-person text-secondary"></i> <span class="text-primary">${f.actionBy || '-'}</span></td><td><button class="btn btn-outline-danger btn-upload-sm ms-1" onclick="event.stopPropagation(); removeFile('${aId}', '${dt}', '${f.fileLink}')"><i class="bi bi-trash"></i></button></td></tr>`;
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+        });
+        tbody.innerHTML = html;
+    }
+
+    // ==========================================
+    // 🌟 SHARED FUNCTIONS (สำหรับทั้งระบบ)
+    // ==========================================
+    function showToast(msg, bgClass = 'bg-dark') { 
+        var toastEl = document.getElementById('statusToast'); toastEl.className = 'toast align-items-center text-white border-0 ' + bgClass;
+        document.getElementById('toastMessage').innerHTML = `<i class="bi bi-info-circle"></i> ` + msg; new bootstrap.Toast(toastEl, {delay: 3000}).show();
+    }
+
+    function goBackToMenu() { 
+        document.getElementById('dynamicModulePage').style.display = 'none'; 
+        document.getElementById('auditResultPage').style.display = 'none'; 
+        document.getElementById('mainMenuPage').style.display = 'block';
+    }
+
+    function openPage(pageId) { 
+        document.getElementById('mainMenuPage').style.display = 'none'; 
+        document.getElementById('dynamicModulePage').style.display = 'none'; 
+        document.getElementById('auditResultPage').style.display = 'none'; 
+        document.getElementById(pageId).style.display = 'block';
+        if(pageId === 'auditResultPage') { loadData02(); }
+    }
+
+    function openAddSessionModal(mode, parentId = "") { 
+        document.getElementById('sysMode').value = mode;
+        document.getElementById('sysParentId').value = parentId; 
+        
+        if (parentId !== "") { document.getElementById('addSessionTitle').innerHTML = '<i class="bi bi-diagram-3"></i> Add Sub-Document'; } 
+        else {
+            if (mode === '02') document.getElementById('addSessionTitle').innerHTML = '<i class="bi bi-cloud-arrow-up"></i> New Upload Session';
+            else document.getElementById('addSessionTitle').innerHTML = '<i class="bi bi-file-earmark-plus"></i> New Main Document';
+        }
+
+        document.getElementById('sysYear').value = new Date().getFullYear();
+        if (mode === '02') {
+            document.getElementById('sysYearCustomerContainer').style.display = 'block';
+            document.getElementById('sysDocTitleContainer').style.display = 'none';
+            document.getElementById('btnCreateSessionContinue').style.display = 'block';
+        } else {
+            document.getElementById('sysYearCustomerContainer').style.display = 'none';
+            document.getElementById('sysDocTitleContainer').style.display = 'block';
+            document.getElementById('btnCreateSessionContinue').style.display = 'none';
+        }
+        new bootstrap.Modal(document.getElementById('addSessionModal')).show();
+    }
+
+    function executeCreateSession(keepOpen) { 
+        var mode = document.getElementById('sysMode').value;
+        var pId = document.getElementById('sysParentId').value; 
+        var y = document.getElementById('sysYear').value || "2026", c = document.getElementById('sysCustomer').value || "Default", r = document.getElementById('sysContact').value;
+        var dTitle = document.getElementById('sysDocTitle').value;
+        
+        if(!r) return alert("Please fill in Contact Person.");
+        if(mode !== '02' && !dTitle) return alert("Please enter a Document Title."); 
+        
+        var btnId = keepOpen ? 'btnCreateSessionContinue' : 'btnCreateSession';
+        var btn = document.getElementById(btnId); var originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i>'; btn.disabled = true; showToast("Creating...", "bg-dark");
+        
+        if (mode === '02') { 
+            google.script.run.withSuccessHandler(msg => { finishCreateSess(msg, keepOpen, originalText, btnId); loadData02(); }).createNewCustomerFolders(y, c, r);
+        } else {
+            google.script.run.withSuccessHandler(msg => { finishCreateSess(msg, keepOpen, originalText, btnId); loadDynamicData(); }).createDynamicSession(mode, y, c, r, dTitle, pId);
+        } 
+    }
+
+    function finishCreateSess(msg, keepOpen, originalText, btnId) { 
+        if(!keepOpen) { bootstrap.Modal.getInstance(document.getElementById('addSessionModal')).hide(); document.getElementById('sysCustomer').value = ""; }
+        document.getElementById('sysContact').value = ""; document.getElementById('sysDocTitle').value = ""; 
+        var btn = document.getElementById(btnId); btn.innerHTML = originalText; btn.disabled = false; 
+        showToast(msg, "bg-success");
+    }
+
+    function deleteSess(mode, aId) { 
+        if(confirm("Permanently delete this?")) { 
+            showToast("Deleting...", "bg-danger");
+            if(mode === '02') { google.script.run.withSuccessHandler(msg => { showToast(msg, "bg-success"); loadData02(); }).deleteAuditSession(aId); } 
+            else { google.script.run.withSuccessHandler(msg => { showToast(msg, "bg-success"); loadDynamicData(); }).deleteDynamicSession(mode, aId); } 
+        } 
+    }
+
+    // 02 Result Tools
+    function openEditDetailModal(aId, type, link, currentDetail) { document.getElementById('editDetailAuditId').value = aId; document.getElementById('editDetailDocType').value = type; document.getElementById('editDetailFileLink').value = link; document.getElementById('editDetailInput').value = currentDetail; new bootstrap.Modal(document.getElementById('editDetailModal')).show(); }
+    function saveEditDetail() { var aId = document.getElementById('editDetailAuditId').value; var type = document.getElementById('editDetailDocType').value; var link = document.getElementById('editDetailFileLink').value; var detail = document.getElementById('editDetailInput').value; document.getElementById('btnSaveDetail').innerHTML = '<i class="bi bi-arrow-repeat spin"></i>'; document.getElementById('btnSaveDetail').disabled = true; showToast("Updating detail...", "bg-dark"); google.script.run.withSuccessHandler(msg => { bootstrap.Modal.getInstance(document.getElementById('editDetailModal')).hide(); document.getElementById('btnSaveDetail').innerHTML = 'Save Detail'; document.getElementById('btnSaveDetail').disabled = false; showToast(msg, "bg-success"); loadData02(); }).editFileDetail(aId, type, link, detail); }
+    function openUploadModal(y, c, aId, type) { document.getElementById('uploadYear').value = y; document.getElementById('uploadCustomer').value = c; document.getElementById('uploadAuditId').value = aId; document.getElementById('uploadDocType').value = type; document.getElementById('uploadDetail').value = ""; document.getElementById('fileInput').value = ""; document.getElementById('fileNameDisplay').value = ""; new bootstrap.Modal(document.getElementById('uploadModal')).show(); }
+    function uploadFile() { var fInput = document.getElementById('fileInput'); if(fInput.files.length===0) return alert("Please select a file."); var y = document.getElementById('uploadYear').value, c = document.getElementById('uploadCustomer').value, aId = document.getElementById('uploadAuditId').value, type = document.getElementById('uploadDocType').value, detail = document.getElementById('uploadDetail').value; var folderId = "11eTo7X-xeLe7WGnPOyNnF4_DS8qNkPbf"; var f = fInput.files[0], reader = new FileReader(); document.getElementById('btnSaveFile').innerHTML = '<i class="bi bi-arrow-repeat spin"></i>'; document.getElementById('btnSaveFile').disabled = true; showToast("Uploading...", "bg-dark"); reader.onload = e => { google.script.run.withSuccessHandler(msg => { bootstrap.Modal.getInstance(document.getElementById('uploadModal')).hide(); document.getElementById('btnSaveFile').innerHTML = 'Save File'; document.getElementById('btnSaveFile').disabled = false; document.getElementById('uploadDetail').value = ""; document.getElementById('fileInput').value = ""; document.getElementById('fileNameDisplay').value = ""; showToast(msg, "bg-success"); loadData02(); }).uploadFileToDrive(e.target.result, f.name, y, c, aId, type, folderId, detail); }; reader.readAsDataURL(f); }
+    function removeFile(aId, type, link) { if(confirm("Delete this file?")) { showToast("Deleting...", "bg-danger"); google.script.run.withSuccessHandler(msg => { showToast(msg, "bg-success"); loadData02(); }).removeFileFromSheet(aId, type, link); } }
+    function openEditCustomerModal(c) { document.getElementById('oldCustomerName').value = c; document.getElementById('renameCustomerInput').value = c; new bootstrap.Modal(document.getElementById('editCustomerModal')).show(); }
+    function saveEditCustomer() { var oldC = document.getElementById('oldCustomerName').value, newC = document.getElementById('renameCustomerInput').value; if(newC===""||newC===oldC) return; document.getElementById('btnEditCustomer').innerHTML = '<i class="bi bi-arrow-repeat spin"></i>'; document.getElementById('btnEditCustomer').disabled = true; showToast("Updating data...", "bg-dark"); google.script.run.withSuccessHandler(msg => { bootstrap.Modal.getInstance(document.getElementById('editCustomerModal')).hide(); document.getElementById('btnEditCustomer').innerHTML = 'Save'; document.getElementById('btnEditCustomer').disabled = false; showToast(msg, "bg-success"); loadData02(); }).renameCustomerInSheet(oldC, newC); }
+
+    // ==========================================
+    // 🌟 SETUP TinyMCE
+    // ==========================================
+    function initTinyMCE() {
+        tinymce.init({
+            selector: '#tinymce-editor', height: 500, plugins: 'table image link lists code',
+            toolbar: 'undo redo | blocks | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist | table insertAuditTable | link image customFileBtn | code',
+            menubar: false, branding: false, promotion: false,
+            table_toolbar: 'tableprops tabledelete | tableinsertrowbefore tableinsertrowafter tabledeleterow | tableinsertcolbefore tableinsertcolafter tabledeletecol | tablecellbackgroundcolor tablecellbordercolor',
+            content_style: "body { font-family:Inter,sans-serif; font-size:14px } td, th { vertical-align: top !important; }",
+            setup: function (editor) {
+                editor.ui.registry.addButton('insertAuditTable', {
+                    icon: 'new-document', tooltip: 'แทรกตาราง Audit หัว 2 ชั้น',
+                    onAction: function () {
+                        editor.insertContent(`<table style="width: 100%; border-collapse: collapse; text-align: center; font-family: 'Inter', sans-serif;" border="1"><thead><tr style="background-color: #0033a0; color: #ffffff;"><th rowspan="2" style="width: 8%; padding: 12px; border: 1px solid #444;">No.</th><th rowspan="2" style="width: 42%; padding: 12px; border: 1px solid #444;">Audit Checklist / Detail</th><th colspan="2" style="width: 30%; padding: 8px; border: 1px solid #444;">Evaluation Result</th><th rowspan="2" style="width: 20%; padding: 12px; border: 1px solid #444;">Remarks / Note</th></tr><tr style="background-color: #e9ecef; color: #333333;"><th style="width: 15%; padding: 8px; border: 1px solid #444;">Status (Pass/Fail)</th><th style="width: 15%; padding: 8px; border: 1px solid #444;">Score</th></tr></thead><tbody><tr><td style="padding: 10px; border: 1px solid #ccc;">1</td><td style="text-align: left; padding: 10px; border: 1px solid #ccc;">รายละเอียดการตรวจสอบรายการที่ 1...</td><td style="padding: 10px; border: 1px solid #ccc;"></td><td style="padding: 10px; border: 1px solid #ccc;"></td><td style="padding: 10px; border: 1px solid #ccc;"></td></tr></tbody></table><p><br></p>`);
+                    }
+                });
+                editor.ui.registry.addButton('customFileBtn', {
+                    icon: 'upload', tooltip: 'Upload Document / File',
+                    onAction: function () {
+                        var input = document.createElement('input'); input.setAttribute('type', 'file');
+                        input.onchange = function () {
+                            var file = this.files[0]; if (!file) return;
+                            var uniqueId = 'upload-placeholder-' + new Date().getTime();
+                            editor.insertContent(`<span id="${uniqueId}" style="background-color: #f8f9fa; border: 1px dashed #adb5bd; color: #6c757d; padding: 4px 12px; border-radius: 20px; font-size: 0.9em; font-style: italic; display: inline-block; margin: 2px 4px; vertical-align: middle;" contenteditable="false">⏳ กำลังอัปโหลด: ${file.name}...</span>`);
+                            showToast("Uploading file to document...", "bg-dark");
+                            var reader = new FileReader(); reader.readAsDataURL(file);
+                            reader.onload = function () {
+                                google.script.run.withSuccessHandler(function(url) {
+                                    var linkHtml = `<a href="${url}" target="_blank" rel="noopener noreferrer" contenteditable="false" style="background-color: #e0f2fe; border: 1px solid #7dd3fc; color: #0369a1; padding: 4px 12px; border-radius: 20px; font-size: 0.9em; font-weight: 600; display: inline-block; cursor: pointer; margin: 2px 4px; vertical-align: middle; text-decoration: none;" title="View Attached File">📎 ${file.name}</a>&nbsp;`;
+                                    var edDoc = editor.getDoc(); var pNode = edDoc.getElementById(uniqueId);
+                                    if (pNode) pNode.outerHTML = linkHtml; else editor.insertContent(linkHtml);
+                                    showToast("File inserted successfully!", "bg-success");
+                                }).withFailureHandler(function(error) {
+                                    var edDoc = editor.getDoc(); var pNode = edDoc.getElementById(uniqueId);
+                                    if (pNode) pNode.outerHTML = `<span style="color: #dc3545; font-size: 0.9em;">❌ Upload Failed: ${file.name}</span>`;
+                                    alert("Upload failed: " + error.message);
+                                }).uploadMediaToDrive(reader.result, file.name, false);
+                            };
+                        }; input.click();
+                    }
+                });
+            }
+        });
+    }
+
+    document.addEventListener('focusin', function(e) { if (e.target.closest('.tox-tinymce-aux, .moxman-window, .tam-assetmanager-root') !== null) { e.stopImmediatePropagation(); } });
+
+    // ==========================================
+    // 🌟 EXPORT TO WORD
+    // ==========================================
+    function exportToWord() {
+        var content = document.getElementById('docViewer').innerHTML;
+        if (!content || content.trim() === "") return alert("No document content to export!");
+        var tempDiv = document.createElement('div'); tempDiv.innerHTML = content;
+        var allImgs = tempDiv.getElementsByTagName('img');
+        for(var k = 0; k < allImgs.length; k++) { allImgs[k].style.width = '100%'; allImgs[k].style.maxWidth = '600px'; allImgs[k].style.height = 'auto'; allImgs[k].setAttribute('width', '600'); }
+        var fileIds = []; var idToImgMap = {};
+        for(var i = 0; i < allImgs.length; i++) {
+            var src = allImgs[i].src; var match = src.match(/id=([a-zA-Z0-9_-]+)/);
+            if(match) { var id = match[1]; if(fileIds.indexOf(id) === -1) fileIds.push(id); if(!idToImgMap[id]) idToImgMap[id] = []; idToImgMap[id].push(allImgs[i]); }
+        }
+        if(fileIds.length === 0) { finalizeWordExport(tempDiv.innerHTML); return; }
+        var btn = document.querySelector('button[onclick="exportToWord()"]'); var originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Packing Images...'; btn.disabled = true; showToast("Processing embedded images for Word...", "bg-dark");
+        google.script.run.withSuccessHandler(function(base64Data) {
+            for(var id in base64Data) { if(base64Data[id]) { idToImgMap[id].forEach(function(imgEl) { imgEl.src = base64Data[id]; }); } }
+            btn.innerHTML = originalText; btn.disabled = false; finalizeWordExport(tempDiv.innerHTML); 
+        }).withFailureHandler(function(err) {
+            btn.innerHTML = originalText; btn.disabled = false; alert("Failed to process some images: " + err.message); finalizeWordExport(tempDiv.innerHTML); 
+        }).getBase64FromDrive(fileIds);
+    }
+
+    function finalizeWordExport(htmlContent) {
+        var css = '<style>@page WordSection1 { size: 595.3pt 841.9pt; margin: 54.0pt 54.0pt 54.0pt 54.0pt; } div.WordSection1 { page: WordSection1; font-family: "TH SarabunPSK", "Sarabun", "Tahoma", sans-serif; font-size: 16pt; } p, span, td, th, div { font-family: "TH SarabunPSK", "Sarabun", "Tahoma", sans-serif; font-size: 16pt; } table { border-collapse: collapse; width: 100% !important; table-layout: fixed; } td, th { border: 1px solid black; padding: 5px; word-wrap: break-word; } img { max-width: 100%; height: auto; }</style>';
+        var header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta http-equiv='Content-Type' content='text/html; charset=utf-8'><title>" + window.currentViewTitle + "</title>" + css + "</head><body><div class='WordSection1'>";
+        var footer = "</div></body></html>";
+        var sourceHTML = header + htmlContent + footer;
+        var source = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent('\ufeff' + sourceHTML);
+        var fileDownload = document.createElement("a"); document.body.appendChild(fileDownload); fileDownload.href = source; fileDownload.download = window.currentViewTitle + '.doc'; fileDownload.click(); document.body.removeChild(fileDownload); showToast("Exported to Word successfully!", "bg-success");
+    }
+</script>
