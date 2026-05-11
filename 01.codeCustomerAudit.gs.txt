@@ -1,0 +1,183 @@
+var SHEET_ID = "17Q4V1y_uzrNSXyHDVM0TTd_mmHTyiodQJQ0lVDgxHT0"; 
+
+function doGet() { 
+  try {
+    var output = HtmlService.createTemplateFromFile('01.CustomerAudit').evaluate(); 
+    output.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    return output;
+  } catch (e) {
+    return HtmlService.createHtmlOutput("Error Loading System: " + e.message);
+  }
+}
+
+function include(filename) { return HtmlService.createHtmlOutputFromFile(filename).getContent(); }
+
+// ==========================================
+// 🌟 DYNAMIC MODULES CONTROL
+// ==========================================
+function getSystemModules() {
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var master = ss.getSheetByName("Master_Modules");
+    if (!master) {
+      master = ss.insertSheet("Master_Modules");
+      master.appendRow(["Module_ID", "Module_Name", "Icon", "Type"]);
+    }
+    var data = master.getDataRange().getValues();
+    if(data.length > 0) data.shift();
+    return data;
+  } catch (e) { throw new Error(e.message); }
+}
+
+function createNewModule(moduleName, iconClass) {
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var master = ss.getSheetByName("Master_Modules");
+    var newId = "M" + new Date().getTime();
+    master.appendRow([newId, moduleName, iconClass, "RichText"]);
+
+    var newSheet = ss.getSheetByName(moduleName);
+    if (!newSheet) {
+      newSheet = ss.insertSheet(moduleName);
+      newSheet.appendRow(["Timestamp","Year","Customer","Audit_ID","Doc_Type","Content_HTML","Editor","Real_Name","Status","Parent_ID"]);
+    }
+    return "Success: โมดูลใหม่ [" + moduleName + "] ถูกสร้างและพร้อมใช้งานแล้ว!";
+  } catch (e) { throw new Error(e.message); }
+}
+
+function deleteSystemModule(moduleId, moduleName) {
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var master = ss.getSheetByName("Master_Modules");
+    var data = master.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] === moduleId) {
+        master.deleteRow(i + 1);
+        break;
+      }
+    }
+    var targetSheet = ss.getSheetByName(moduleName);
+    if (targetSheet) { ss.deleteSheet(targetSheet); }
+    return "ลบโมดูล [" + moduleName + "] ออกจากระบบเรียบร้อยแล้ว";
+  } catch (e) { throw new Error(e.message); }
+}
+
+// ==========================================
+// 🌟 UNIVERSAL DYNAMIC FUNCTIONS 
+// ==========================================
+function getDynamicData(sheetName) {
+  try {
+    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(sheetName);
+    if(!sheet) return [];
+    var data = sheet.getDataRange().getDisplayValues(); 
+    if (data.length <= 1) return []; data.shift(); return data;
+  } catch (e) { throw new Error(e.message); }
+}
+
+function createDynamicSession(sheetName, year, customerName, realName, docTitle, parentId) {
+  try {
+    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(sheetName);
+    var rawDate = new Date();
+    var timestampStr = Utilities.formatDate(rawDate, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+    var userEmail = Session.getActiveUser().getEmail() || "Unknown User";
+    var auditId = "DY-" + Utilities.formatDate(rawDate, Session.getScriptTimeZone(), "yyMMdd-HHmmss");
+    var pId = parentId || "";
+    sheet.appendRow([timestampStr, year, customerName, auditId, docTitle, "", userEmail, realName, "Draft", pId]);
+    SpreadsheetApp.flush(); return "Success: สร้างเอกสาร [" + docTitle + "] เรียบร้อยแล้ว";
+  } catch (e) { throw new Error(e.message); }
+}
+
+function renameDynamicDocTitle(sheetName, auditId, newTitle) {
+  try {
+    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(sheetName);
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) { 
+        if (data[i][3] == auditId) { sheet.getRange(i + 1, 5).setValue(newTitle); SpreadsheetApp.flush(); return "Success: อัปเดตชื่อเอกสารแล้ว"; } 
+    } throw new Error("ไม่พบข้อมูล");
+  } catch(e) { throw new Error(e.message); }
+}
+
+function saveDynamicDocContent(sheetName, auditId, htmlContent) {
+  try {
+    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(sheetName);
+    var data = sheet.getDataRange().getValues();
+    var timestampStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+    var userEmail = Session.getActiveUser().getEmail() || "Unknown User";
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][3]).trim() === String(auditId).trim()) { 
+        var targetRow = i + 1;
+        sheet.getRange(targetRow, 1).setValue(timestampStr); 
+        sheet.getRange(targetRow, 6).setValue(htmlContent); 
+        sheet.getRange(targetRow, 7).setValue(userEmail);
+        sheet.getRange(targetRow, 9).setValue("Completed"); 
+        SpreadsheetApp.flush(); return "บันทึกข้อมูลเรียบร้อยแล้ว!";
+      }
+    } throw new Error("หา ID ไม่พบ");
+  } catch (e) { throw new Error(e.message); }
+}
+
+function deleteDynamicSession(sheetName, auditId) {
+  try {
+    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(sheetName);
+    var data = sheet.getDataRange().getValues();
+    var idsToDelete = [auditId];
+    function findChildren(id) {
+      for (var i = 1; i < data.length; i++) { if (data[i][9] == id) { idsToDelete.push(data[i][3]); findChildren(data[i][3]); } }
+    }
+    findChildren(auditId);
+    for (var i = data.length - 1; i >= 1; i--) { if (idsToDelete.indexOf(data[i][3]) !== -1) { sheet.deleteRow(i + 1); } }
+    SpreadsheetApp.flush(); return "Success: ลบเอกสารและหัวข้อย่อยเรียบร้อย";
+  } catch(e) { throw new Error(e.message); }
+}
+
+// ==========================================
+// 🌟 MEDIA & EXPORT FUNCTIONS
+// ==========================================
+function uploadMediaToDrive(base64Data, fileName, isImage) {
+  try {
+    var folderId = "11eTo7X-xeLe7WGnPOyNnF4_DS8qNkPbf";
+    var folder = DriveApp.getFolderById(folderId);
+    var splitBase = base64Data.split(','); var type = splitBase[0].split(';')[0].replace('data:', '');
+    var blob = Utilities.newBlob(Utilities.base64Decode(splitBase[1]), type, fileName);
+    var file = folder.createFile(blob);
+    try { file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW); } catch(sharingError) {}
+    if (isImage) { return "https://drive.google.com/thumbnail?id=" + file.getId() + "&sz=w1000";
+    } else { return file.getUrl(); }
+  } catch (e) { throw new Error(e.message); }
+}
+
+function getBase64FromDrive(fileIds) {
+  try { var result = {};
+    for(var i = 0; i < fileIds.length; i++) { var id = fileIds[i]; try { var file = DriveApp.getFileById(id);
+    var blob = file.getBlob(); var b64 = Utilities.base64Encode(blob.getBytes()); var mime = blob.getContentType();
+    result[id] = "data:" + mime + ";base64," + b64; } catch(e) { result[id] = null; } } return result;
+  } catch(e) { throw new Error(e.message); }
+}
+
+// 🌟 ฟังก์ชันส่งอีเมลเนื้อหาเอกสาร
+function sendAuditEmail(targetEmail, subject, htmlContent) {
+  try {
+    // ดึง CSS สำหรับจัดรูปแบบอีเมลให้สวยงามเหมือนในระบบ
+    var emailStyle = '<style>' +
+      'table { border-collapse: collapse; width: 100%; font-family: sans-serif; } ' +
+      'td, th { border: 1px solid #ddd; padding: 8px; vertical-align: top; } ' +
+      'th { background-color: #0033a0; color: white; } ' +
+      'img { max-width: 100%; height: auto; } ' +
+      '</style>';
+
+    var finalHtml = '<html><body>' + emailStyle + 
+                    '<h3>Audit Document: ' + subject + '</h3><hr>' + 
+                    htmlContent + 
+                    '<br><p style="color:gray;">Sent via TS-BB(Audit) Platform</p></body></html>';
+
+    MailApp.sendEmail({
+      to: targetEmail,
+      subject: "[Audit Report] " + subject,
+      htmlBody: finalHtml
+    });
+
+    return "ส่งอีเมลไปยัง " + targetEmail + " เรียบร้อยแล้ว!";
+  } catch (e) {
+    throw new Error("ส่งอีเมลไม่สำเร็จ: " + e.message);
+  }
+}

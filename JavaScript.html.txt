@@ -1,0 +1,561 @@
+<script>
+    window.currentActiveSheet = ""; 
+    window.uiStateDynamic = {};
+    window.currentDynamicData = []; 
+
+    document.addEventListener("DOMContentLoaded", function() {
+        initTinyMCE();
+        loadSystemModules(); 
+    });
+
+    function showToast(msg, bgClass = 'bg-dark') { 
+        var toastEl = document.getElementById('statusToast'); 
+        toastEl.className = 'toast align-items-center text-white border-0 ' + bgClass;
+        document.getElementById('toastMessage').innerHTML = `<i class="bi bi-info-circle"></i> ` + msg; 
+        new bootstrap.Toast(toastEl, {delay: 3000}).show();
+    }
+
+    // ==========================================
+    // 🌟 ระบบสร้างและโหลด MENU
+    // ==========================================
+    function loadSystemModules() {
+        google.script.run.withSuccessHandler(renderMainMenu).getSystemModules();
+    }
+
+    function renderMainMenu(modules) {
+        var grid = document.getElementById('menuGrid');
+        var html = '';
+        
+        modules.forEach(m => {
+            var mId = m[0], mName = m[1], mIcon = m[2];
+            html += `
+            <div class="col-md-4 position-relative">
+                <div class="card menu-card h-100 text-center p-4 border-info" onclick="openDynamicPage('${mName}', '${mIcon}')">
+                    <button class="btn btn-sm btn-outline-danger btn-delete-module border-0" onclick="event.stopPropagation(); executeDeleteModule('${mId}', '${mName}')" title="Delete Module"><i class="bi bi-trash"></i></button>
+                    <i class="bi ${mIcon} icon-large text-info"></i><h5 class="fw-bold text-info">${mName}</h5><small class="text-muted">Dynamic Document</small>
+                </div>
+            </div>`;
+        });
+
+        html += `
+        <div class="col-md-4">
+            <div class="card border-dashed h-100 text-center p-4" onclick="new bootstrap.Modal(document.getElementById('addModuleModal')).show();">
+                <i class="bi bi-plus-circle icon-large text-secondary"></i><h5 class="fw-bold text-secondary">Add New Module</h5><small class="text-muted">Create new data structure</small>
+            </div>
+        </div>`;
+
+        grid.innerHTML = html;
+    }
+
+    function executeCreateModule() {
+        var mName = document.getElementById('newModuleName').value.trim();
+        var mIcon = document.getElementById('newModuleIcon').value;
+        if(mName === "") return alert("กรุณาใส่ชื่อโมดูล");
+        
+        var btn = document.getElementById('btnCreateModule');
+        btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Creating...'; btn.disabled = true;
+        showToast("กำลังสร้างตารางข้อมูลหลังบ้าน...", "bg-dark");
+
+        google.script.run.withSuccessHandler(msg => {
+            bootstrap.Modal.getInstance(document.getElementById('addModuleModal')).hide();
+            document.getElementById('newModuleName').value = "";
+            btn.innerHTML = 'Create Module'; btn.disabled = false;
+            showToast(msg, "bg-success");
+            loadSystemModules(); 
+        }).createNewModule(mName, mIcon);
+    }
+
+    function executeDeleteModule(moduleId, moduleName) {
+        var confirmMsg = "⚠️ คำเตือนระดับอันตราย!\n\nคุณแน่ใจหรือไม่ว่าจะลบโมดูล '" + moduleName + "'?\nข้อมูลจะถูกลบทิ้งอย่างถาวร!";
+        if(confirm(confirmMsg)) {
+            showToast("กำลังลบตารางข้อมูลหลังบ้าน...", "bg-danger");
+            google.script.run.withSuccessHandler(msg => {
+                showToast(msg, "bg-success");
+                loadSystemModules(); 
+            }).withFailureHandler(err => {
+                alert("เกิดข้อผิดพลาด: " + err.message);
+            }).deleteSystemModule(moduleId, moduleName);
+        }
+    }
+
+    // ==========================================
+    // 🌟 ระบบแสดงผลหน้า DYNAMIC (Nested Tree)
+    // ==========================================
+    function openDynamicPage(sheetName, iconClass) {
+        window.currentActiveSheet = sheetName;
+        document.getElementById('dynPageTitle').innerHTML = `<i class="bi ${iconClass}"></i> ${sheetName}`;
+        openPage('dynamicModulePage');
+        loadDynamicData();
+    }
+
+    function loadDynamicData() {
+        var tbody = document.getElementById('tableBody_Dynamic');
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-5 text-muted"><i class="bi bi-arrow-repeat spin fs-2"></i><br>Loading data...</td></tr>`;
+        google.script.run.withSuccessHandler(data => { window.currentDynamicData = data; renderDynamicTable(data); }).getDynamicData(window.currentActiveSheet);
+    }
+
+    function isExpDynamic(sheetName, key) { 
+        if(!window.uiStateDynamic[sheetName]) window.uiStateDynamic[sheetName] = { sessions: {} };
+        return window.uiStateDynamic[sheetName].sessions[key] === true; 
+    }
+    function togDynamic(key) { 
+        var sheetName = window.currentActiveSheet;
+        if(!window.uiStateDynamic[sheetName]) window.uiStateDynamic[sheetName] = { sessions: {} };
+        window.uiStateDynamic[sheetName].sessions[key] = !isExpDynamic(sheetName, key); 
+        renderDynamicTable(window.currentDynamicData); 
+    }
+
+    function renderDynamicTable(data) {
+        var tbody = document.getElementById('tableBody_Dynamic');
+        var sheetName = window.currentActiveSheet;
+        if (!data || data.length === 0) { tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-5"><i class="bi bi-inbox fs-1"></i><br><strong>No Documents in ${sheetName}</strong></td></tr>`; return; }
+        
+        var tree = {}; var rootNodes = [];
+        data.forEach(function(row) {
+            var ts=row[0], year=row[1], cust=row[2], aId=row[3], title=row[4], content=row[5], by=row[6], rName=row[7], status=row[8], pId=row[9];
+            if (!aId) return;
+            var node = { aId, title, content, by, rName, status, ts, children: [] };
+            if (!pId || pId.trim() === "") { rootNodes.push(node); } else { if (!tree[pId]) tree[pId] = []; tree[pId].push(node); }
+        });
+        function attachChildren(nodes) { nodes.forEach(node => { if (tree[node.aId]) { node.children = tree[node.aId]; attachChildren(node.children); } }); }
+        attachChildren(rootNodes);
+        
+        var html = '';
+        function buildTreeHtml(nodes, level) {
+            nodes.forEach(node => {
+                var padding = 20 + (level * 40); var hasChildren = node.children.length > 0;
+                var isExpanded = isExpDynamic(sheetName, node.aId); 
+                var icon = hasChildren ? (isExpanded ? 'chevron-down text-dark fw-bold' : 'chevron-right text-dark fw-bold') : 'dash text-muted';
+                var isCompleted = node.status === "Completed" && node.content !== "";
+                var statusBadge = isCompleted ? `<span class="badge bg-success"><i class="bi bi-check-circle"></i> Completed</span>` : `<span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split"></i> Draft</span>`;
+                var safeContent = isCompleted ? encodeURIComponent(node.content) : "";
+                var bgClass = level === 0 ? 'bg-light' : '';              
+                var statusBadge = isCompleted ? `<span class="badge bg-success hide-on-idle"><i class="bi bi-check-circle"></i> Completed</span>` : `<span class="badge bg-warning text-dark hide-on-idle"><i class="bi bi-hourglass-split"></i> Draft</span>`;
+                var safeContent = isCompleted ? encodeURIComponent(node.content) : "";
+                var bgClass = level === 0 ? 'bg-light' : '';
+
+                html += `
+                <tr class="row-document hover-highlight ${bgClass}" onclick="if(${hasChildren}) { togDynamic('${node.aId}'); }">
+                    <td class="text-start" style="padding-left: ${padding}px; border-left: ${level > 0 ? '2px dashed #dee2e6' : 'none'};">
+                        <span style="cursor: ${hasChildren ? 'pointer' : 'default'}"><i class="bi bi-${icon} me-2"></i></span>
+                        <i class="bi bi-file-earmark-richtext text-info fs-5 align-middle me-1"></i> 
+                        <strong class="text-dark fs-6">${node.title}</strong>
+                        <button class="btn btn-sm btn-link text-secondary p-0 ms-2 hide-on-idle" onclick="event.stopPropagation(); editDynamicTitle('${node.aId}', '${node.title}')" title="Edit Title"><i class="bi bi-pencil"></i></button>
+                        <br><small class="text-muted" style="margin-left: 35px;"><i class="bi bi-person text-secondary"></i> ${node.rName || '-'}</small>
+                    </td>
+                    <td class="text-center align-middle">${statusBadge}</td>
+                    <td class="text-center align-middle" style="font-size: 0.85em; color: #6c757d;">${node.ts || '-'}<br>${node.by}</td>
+                   <td class="text-center align-middle">
+                        ${isCompleted ? `<button class="btn btn-outline-primary btn-sm me-1 shadow-sm" onclick="event.stopPropagation(); viewDocument('${node.aId}')"><i class="bi bi-eye"></i> View</button>` : ''}
+                        
+                        <div class="hide-on-idle d-inline-block">
+                            <button class="btn btn-sm btn-outline-success me-1 shadow-sm" onclick="event.stopPropagation(); openAddSessionModal('${sheetName}', '${node.aId}')"><i class="bi bi-plus-circle"></i> Sub</button>
+                            <button class="btn btn-info btn-sm text-white fw-bold shadow-sm" onclick="event.stopPropagation(); openEditor('${node.aId}')"><i class="bi bi-pencil-square"></i> Edit</button>
+                            <button class="btn btn-outline-danger btn-sm ms-1 shadow-sm" onclick="event.stopPropagation(); deleteSess('${sheetName}', '${node.aId}')"><i class="bi bi-trash"></i></button>
+                        </div>
+                    </td>
+                </tr>`;
+                if (hasChildren && isExpanded) { buildTreeHtml(node.children, level + 1); }
+            });
+        }
+        if (rootNodes.length > 0) { buildTreeHtml(rootNodes, 0); } else { html = `<tr><td colspan="4" class="text-center text-muted py-5"><i class="bi bi-inbox fs-1"></i><br><strong>No Documents</strong></td></tr>`; }
+        tbody.innerHTML = html;
+    }
+
+    function editDynamicTitle(aId, oldTitle) {
+        var newTitle = prompt("Enter new document title:", oldTitle);
+        if (newTitle && newTitle !== oldTitle) { showToast("Updating title...", "bg-dark"); google.script.run.withSuccessHandler(msg => { showToast(msg, "bg-success"); loadDynamicData(); }).renameDynamicDocTitle(window.currentActiveSheet, aId, newTitle); }
+    }
+
+    function goBackToMenu() { 
+        document.getElementById('dynamicModulePage').style.display = 'none'; 
+        document.getElementById('mainMenuPage').style.display = 'block';
+    }
+
+    function openPage(pageId) { 
+        document.getElementById('mainMenuPage').style.display = 'none'; 
+        document.getElementById('dynamicModulePage').style.display = 'none'; 
+        document.getElementById(pageId).style.display = 'block';
+    }
+
+    // ==========================================
+    // 🌟 ระบบจัดการ Modal เอกสารใหม่
+    // ==========================================
+    function openAddSessionModal(mode, parentId = "") { 
+        document.getElementById('sysMode').value = mode;
+        document.getElementById('sysParentId').value = parentId; 
+        
+        if (parentId !== "") { 
+            document.getElementById('addSessionTitle').innerHTML = '<i class="bi bi-diagram-3"></i> Add Sub-Document'; 
+        } else {
+            document.getElementById('addSessionTitle').innerHTML = '<i class="bi bi-file-earmark-plus"></i> New Main Document';
+        }
+        new bootstrap.Modal(document.getElementById('addSessionModal')).show();
+    }
+
+    function executeCreateSession() { 
+        var mode = document.getElementById('sysMode').value;
+        var pId = document.getElementById('sysParentId').value; 
+        var y = new Date().getFullYear();
+        var c = "Internal"; // ค่าเริ่มต้นสำหรับฐานข้อมูล
+        var r = document.getElementById('sysContact').value;
+        var dTitle = document.getElementById('sysDocTitle').value;
+        
+        if(!r) return alert("Please fill in Contact Person.");
+        if(!dTitle) return alert("Please enter a Document Title."); 
+        
+        var btn = document.getElementById('btnCreateSession'); 
+        var originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i>'; btn.disabled = true; showToast("Creating...", "bg-dark");
+        
+        google.script.run.withSuccessHandler(msg => { 
+            bootstrap.Modal.getInstance(document.getElementById('addSessionModal')).hide();
+            document.getElementById('sysContact').value = ""; 
+            document.getElementById('sysDocTitle').value = ""; 
+            btn.innerHTML = originalText; btn.disabled = false; 
+            showToast(msg, "bg-success");
+            loadDynamicData(); 
+        }).createDynamicSession(mode, y, c, r, dTitle, pId);
+    }
+
+    function deleteSess(mode, aId) { 
+        if(confirm("Permanently delete this?")) { 
+            showToast("Deleting...", "bg-danger");
+            google.script.run.withSuccessHandler(msg => { showToast(msg, "bg-success"); loadDynamicData(); }).deleteDynamicSession(mode, aId);
+        } 
+    }
+
+    // ==========================================
+    // 🌟 SETUP TinyMCE (รูปภาพย่อขนาดอัตโนมัติ + ดัก Error)
+    // ==========================================
+    function initTinyMCE() {
+        tinymce.init({
+            selector: '#tinymce-editor', 
+            height: 500, 
+            plugins: 'table image link lists code',
+            toolbar: 'undo redo | blocks | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist | table insertAuditTable | link image customFileBtn | code',
+            menubar: false, branding: false, promotion: false,
+            table_toolbar: 'tableprops tabledelete | tableinsertrowbefore tableinsertrowafter tabledeleterow | tableinsertcolbefore tableinsertcolafter tabledeletecol | tablecellbackgroundcolor tablecellbordercolor',
+            content_style: "body { font-family:Inter,sans-serif; font-size:14px } td, th { vertical-align: top !important; }",
+            
+            images_upload_handler: function (blobInfo, progress) {
+                return new Promise((resolve, reject) => {
+                    var reader = new FileReader();
+                    reader.readAsDataURL(blobInfo.blob());
+                    reader.onload = function () {
+                        var img = new Image();
+                        img.src = reader.result;
+                        
+                        img.onload = function() {
+                            var MAX_WIDTH = 1200;
+                            var MAX_HEIGHT = 1200;
+                            var width = img.width;
+                            var height = img.height;
+
+                            if (width > height) {
+                                if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+                            } else {
+                                if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+                            }
+
+                            var canvas = document.createElement('canvas');
+                            canvas.width = width; canvas.height = height;
+                            var ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, width, height);
+                            var compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+
+                            google.script.run
+                            .withSuccessHandler(function(url) { resolve(url); })
+                            .withFailureHandler(function(err) { 
+                                var errorMsg = err.message || err || "Unknown Error";
+                                reject('Upload failed: ' + errorMsg); 
+                            })
+                            .uploadMediaToDrive(compressedBase64, blobInfo.filename() + ".jpg", true);
+                        };
+                        img.onerror = function() { reject('Image loading error'); };
+                    };
+                    reader.onerror = function() { reject('Image format error'); }
+                });
+            },
+            
+            setup: function (editor) {
+                editor.ui.registry.addButton('insertAuditTable', {
+                    icon: 'new-document',
+                    tooltip: 'แทรกตาราง Audit หัว 2 ชั้น',
+                    onAction: function () {
+                        var tableTemplate = `<table style="width: 100%; border-collapse: collapse; text-align: center; font-family: 'Inter', sans-serif;" border="1"><thead><tr style="background-color: #0033a0; color: #ffffff;"><th rowspan="2" style="width: 8%; padding: 12px; border: 1px solid #444;">No.</th><th rowspan="2" style="width: 42%; padding: 12px; border: 1px solid #444;">Audit Checklist / Detail</th><th colspan="2" style="width: 30%; padding: 8px; border: 1px solid #444;">Evaluation Result</th><th rowspan="2" style="width: 20%; padding: 12px; border: 1px solid #444;">Remarks / Note</th></tr><tr style="background-color: #e9ecef; color: #333333;"><th style="width: 15%; padding: 8px; border: 1px solid #444;">Status (Pass/Fail)</th><th style="width: 15%; padding: 8px; border: 1px solid #444;">Score</th></tr></thead><tbody><tr><td style="padding: 10px; border: 1px solid #ccc;">1</td><td style="text-align: left; padding: 10px; border: 1px solid #ccc;">รายละเอียดการตรวจสอบรายการที่ 1...</td><td style="padding: 10px; border: 1px solid #ccc;"></td><td style="padding: 10px; border: 1px solid #ccc;"></td><td style="padding: 10px; border: 1px solid #ccc;"></td></tr></tbody></table><p><br></p>`;
+                        editor.insertContent(tableTemplate);
+                    }
+                });
+
+// 🌟 ปุ่มอัปโหลดไฟล์แนบแบบแยกสีตามประเภทไฟล์
+                editor.ui.registry.addButton('customFileBtn', {
+                    icon: 'upload',
+                    tooltip: 'Upload Document / File',
+                    onAction: function () {
+                        var input = document.createElement('input');
+                        input.setAttribute('type', 'file');
+                        input.onchange = function () {
+                            var file = this.files[0];
+                            if (!file) return;
+
+                            // เช็คขนาดไฟล์ (กัน Error 413)
+                            var maxSize = 25 * 1024 * 1024;
+                            if (file.size > maxSize) {
+                                alert("⚠️ ไฟล์ใหญ่เกินไป (" + (file.size / 1024 / 1024).toFixed(1) + " MB)\nกรุณาอัปโหลดลง Drive แล้วแปะลิงก์แทนครับ");
+                                return;
+                            }
+
+                            var uniqueId = 'upload-placeholder-' + new Date().getTime();
+                            editor.insertContent(`<span id="${uniqueId}" style="background-color: #f8f9fa; border: 1px dashed #adb5bd; color: #6c757d; padding: 4px 12px; border-radius: 20px; font-size: 0.9em; font-style: italic; display: inline-block; margin: 2px 4px; vertical-align: middle;" contenteditable="false">⏳ กำลังอัปโหลด: ${file.name}...</span>`);
+                            
+                            showToast("Uploading " + file.name + "...", "bg-dark");
+                            
+                            var reader = new FileReader();
+                            reader.readAsDataURL(file);
+                            reader.onload = function () {
+                                google.script.run.withSuccessHandler(function(url) {
+                                    
+                                    // 🌟 โลจิกการเลือกสีตามนามสกุลไฟล์
+                                    var ext = file.name.split('.').pop().toLowerCase();
+                                    var bgColor = "#f1f5f9"; // Default Gray
+                                    var borderColor = "#cbd5e1";
+                                    var textColor = "#475569";
+
+                                    if (['xlsx', 'xls', 'csv'].includes(ext)) {
+                                        bgColor = "#dcfce7"; borderColor = "#86efac"; textColor = "#15803d"; // Green (Excel)
+                                    } else if (ext === 'pdf') {
+                                        bgColor = "#fee2e2"; borderColor = "#fca5a5"; textColor = "#b91c1c"; // Red (PDF)
+                                    } else if (['docx', 'doc'].includes(ext)) {
+                                        bgColor = "#dbeafe"; borderColor = "#93c5fd"; textColor = "#1d4ed8"; // Blue (Word)
+                                    } else if (['pptx', 'ppt'].includes(ext)) {
+                                        bgColor = "#ffedd5"; borderColor = "#fdba74"; textColor = "#c2410c"; // Orange (PPT)
+                                    } else if (['zip', 'rar', '7z'].includes(ext)) {
+                                        bgColor = "#f3e8ff"; borderColor = "#d8b4fe"; textColor = "#7e22ce"; // Purple (Archive)
+                                    }
+
+                                    var linkHtml = `<a href="${url}" target="_blank" rel="noopener noreferrer" contenteditable="false" style="background-color: ${bgColor}; border: 1px solid ${borderColor}; color: ${textColor}; padding: 4px 12px; border-radius: 20px; font-size: 0.9em; font-weight: 600; display: inline-block; cursor: pointer; margin: 2px 4px; vertical-align: middle; text-decoration: none; transition: 0.2s;" title="View ${file.name}">📎 ${file.name}</a>&nbsp;`;
+                                    
+                                    var edDoc = editor.getDoc();
+                                    var pNode = edDoc.getElementById(uniqueId);
+                                    if (pNode) { pNode.outerHTML = linkHtml; } else { editor.insertContent(linkHtml); }
+                                    
+                                    showToast("File attached successfully!", "bg-success");
+                                }).withFailureHandler(function(err) {
+                                    var edDoc = editor.getDoc();
+                                    var pNode = edDoc.getElementById(uniqueId);
+                                    if (pNode) { pNode.outerHTML = `<span style="color: #dc3545; font-size: 0.9em;">❌ Error: ${file.name}</span>`; }
+                                    alert("Upload failed: " + (err.message || err));
+                                }).uploadMediaToDrive(reader.result, file.name, false);
+                            };
+                        };
+                        input.click();
+                    }
+                });
+            }
+        });
+    }
+
+    document.addEventListener('focusin', function(e) { if (e.target.closest('.tox-tinymce-aux, .moxman-window, .tam-assetmanager-root') !== null) { e.stopImmediatePropagation(); } });
+
+function openEditor(aId) {
+        // ค้นหาข้อมูลจาก Array ที่โหลดมาแล้ว
+        var row = window.currentDynamicData.find(r => r[3] === aId);
+        if (!row) return alert("ไม่พบข้อมูลเอกสาร");
+
+        document.getElementById('editDocMode').value = window.currentActiveSheet; 
+        document.getElementById('editDocAuditId').value = aId;
+        document.getElementById('editorDocTitleDisplay').innerText = row[4]; // ชื่อเอกสาร
+
+        var editor = tinymce.get('tinymce-editor');
+        if (editor) { 
+            editor.setContent(row[5] || ""); // เนื้อหา HTML (ดึงมาตรงๆ ไม่ต้องใช้ decodeURIComponent)
+            editor.undoManager.clear();
+        }
+        new bootstrap.Modal(document.getElementById('editorModal')).show();
+    }
+    
+    function saveRichDocument() {
+        var sheetName = document.getElementById('editDocMode').value;
+        var aId = document.getElementById('editDocAuditId').value;
+        var contentHTML = tinymce.get('tinymce-editor').getContent(); 
+        var textOnly = contentHTML.replace(/<[^>]*>?/gm, '').trim();
+        var hasImage = contentHTML.includes('<img');
+        if(textOnly === "" && !hasImage) return alert("Document is empty!");
+
+        var btn = document.getElementById('btnSaveRichDoc');
+        btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Saving...'; btn.disabled = true;
+        showToast("Saving document...", "bg-dark");
+        
+        google.script.run.withSuccessHandler(msg => {
+            bootstrap.Modal.getInstance(document.getElementById('editorModal')).hide();
+            btn.innerHTML = '<i class="bi bi-save"></i> Save Document'; btn.disabled = false;
+            showToast(msg, "bg-success"); loadDynamicData();
+        }).withFailureHandler(err => {
+            btn.innerHTML = '<i class="bi bi-save"></i> Save Document'; btn.disabled = false;
+            alert("Failed to save:\n" + err.message);
+        }).saveDynamicDocContent(sheetName, aId, contentHTML);
+    }
+
+    window.currentViewTitle = "Exported_Document"; 
+    function viewDocument(aId) {
+        // ค้นหาข้อมูลจาก Array ที่โหลดมาแล้ว
+        var row = window.currentDynamicData.find(r => r[3] === aId);
+        if (!row) return alert("ไม่พบข้อมูลเอกสาร");
+
+        window.currentViewTitle = row[4] || "Audit_Document";
+        document.getElementById('docViewer').innerHTML = row[5] || ""; // เนื้อหา HTML
+        new bootstrap.Modal(document.getElementById('viewDocModal')).show();
+    }
+
+    // ==========================================
+    // 🌟 EXPORT TO WORD (Ultimate Version)
+    // ==========================================
+    function exportToWord() {
+        var content = document.getElementById('docViewer').innerHTML;
+        if (!content || content.trim() === "") return alert("No document content to export!");
+        
+        var tempDiv = document.createElement('div'); 
+        tempDiv.innerHTML = content;
+        
+        var allImgs = tempDiv.getElementsByTagName('img');
+        var fileIds = []; var idToImgMap = {};
+        
+        for(var i = 0; i < allImgs.length; i++) {
+            var src = allImgs[i].src; var match = src.match(/id=([a-zA-Z0-9_-]+)/);
+            if(match) { 
+                var id = match[1]; 
+                if(fileIds.indexOf(id) === -1) fileIds.push(id); 
+                if(!idToImgMap[id]) idToImgMap[id] = []; 
+                idToImgMap[id].push(allImgs[i]); 
+            }
+        }
+        
+        if(fileIds.length === 0) { finalizeWordExport(tempDiv.innerHTML); return; }
+        
+        var btn = document.querySelector('button[onclick="exportToWord()"]'); 
+        var originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Packing Images...'; btn.disabled = true; 
+        showToast("Processing embedded images for Word...", "bg-dark");
+        
+        google.script.run.withSuccessHandler(function(base64Data) {
+            for(var id in base64Data) { if(base64Data[id]) { idToImgMap[id].forEach(function(imgEl) { imgEl.src = base64Data[id]; }); } }
+            btn.innerHTML = originalText; btn.disabled = false; finalizeWordExport(tempDiv.innerHTML); 
+        }).withFailureHandler(function(err) {
+            btn.innerHTML = originalText; btn.disabled = false; alert("Failed to process some images: " + err.message); finalizeWordExport(tempDiv.innerHTML); 
+        }).getBase64FromDrive(fileIds);
+    }
+
+    function finalizeWordExport(htmlContent) {
+        var css = '<style>' +
+            '@page WordSection1 { size: 595.3pt 841.9pt; margin: 54.0pt 54.0pt 54.0pt 54.0pt; mso-header-margin:35.4pt; mso-footer-margin:35.4pt; mso-paper-source:0; } ' +
+            'div.WordSection1 { page: WordSection1; } ' +
+            'p, span, td, th, div, body { font-family: "TH Sarabun New", "TH SarabunPSK", "Sarabun", "Tahoma", sans-serif; font-size: 16.0pt; mso-ansi-font-size: 16.0pt; mso-bidi-font-size: 16.0pt; mso-ascii-font-family: "TH Sarabun New"; mso-hansi-font-family: "TH Sarabun New"; mso-bidi-font-family: "TH Sarabun New"; mso-font-kerning: 0pt; line-height: 115%; } ' +
+            'table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; mso-table-anchor-vertical: paragraph; mso-table-anchor-horizontal: column; width: 100%; border: 1px solid black; } ' +
+            'td, th { border: 1px solid black; padding: 5.0pt; vertical-align: top; mso-border-alt: solid black .5pt; } ' +
+            'img { max-width: 100%; height: auto; mso-interpolation-mode: bicubic; }' +
+            '</style>';
+
+        var header = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">' +
+            '<head><meta http-equiv="Content-Type" content="text/html; charset=utf-8">' +
+            '' +
+            css + '</head><body><div class="WordSection1">';
+        
+        var footer = "</div></body></html>";
+        var sourceHTML = header + htmlContent + footer;
+        
+        var blob = new Blob(['\ufeff' + sourceHTML], { type: 'application/msword;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        
+        var fileDownload = document.createElement("a");
+        fileDownload.href = url;
+        fileDownload.download = (window.currentViewTitle || "Audit_Document") + '.doc';
+        document.body.appendChild(fileDownload);
+        fileDownload.click();
+        
+        setTimeout(function() { document.body.removeChild(fileDownload); URL.revokeObjectURL(url); }, 100);
+        showToast("Exported to Word! (Ready for Editing)", "bg-success");
+    }
+
+// 🌟 ฟังก์ชันเปิด Modal กรอกอีเมล
+function openEmailModal() {
+    new bootstrap.Modal(document.getElementById('emailRecipientModal')).show();
+}
+
+// 🌟 ฟังก์ชันสั่งส่งอีเมล
+function executeSendEmail() {
+    var email = document.getElementById('targetEmailInput').value;
+    var content = document.getElementById('docViewer').innerHTML;
+    var subject = window.currentViewTitle;
+
+    if(!email || !email.includes('@')) return alert("กรุณากรอกอีเมลให้ถูกต้อง");
+
+    var btn = document.getElementById('btnConfirmSendEmail');
+    btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Sending...';
+    btn.disabled = true;
+
+    google.script.run.withSuccessHandler(function(msg) {
+        bootstrap.Modal.getInstance(document.getElementById('emailRecipientModal')).hide();
+        btn.innerHTML = 'Confirm Send'; btn.disabled = false;
+        showToast(msg, "bg-success");
+    }).withFailureHandler(function(err) {
+        btn.innerHTML = 'Confirm Send'; btn.disabled = false;
+        alert(err.message);
+    }).sendAuditEmail(email, subject, content);
+}
+
+// ==========================================
+    // 🌟 EXPORT TO PDF
+    // ==========================================
+    function exportToPDF() {
+        var element = document.getElementById('docViewer');
+        if (!element || element.innerHTML.trim() === "") return alert("No document content to export!");
+
+        var btn = document.querySelector('button[onclick="exportToPDF()"]');
+        var originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Generating...';
+        btn.disabled = true;
+        showToast("กำลังเตรียมไฟล์ PDF...", "bg-dark");
+
+        // 🌟 ตั้งค่าหน้ากระดาษ A4
+        var opt = {
+            margin:       [0.5, 0.5], // ขอบกระดาษครึ่งนิ้ว
+            filename:     (window.currentViewTitle || "Audit_Document") + '.pdf',
+            image:        { type: 'jpeg', quality: 0.98 },
+            html2canvas:  { scale: 2, useCORS: true, logging: false },
+            jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+        };
+
+        // 🌟 เช็คว่ามีรูปภาพไหม ถ้ามีให้แปลงรูปจาก Drive เป็น Base64 ก่อน (เหมือนระบบ Word)
+        var allImgs = element.getElementsByTagName('img');
+        var fileIds = [];
+        for(var i = 0; i < allImgs.length; i++) {
+            var match = allImgs[i].src.match(/id=([a-zA-Z0-9_-]+)/);
+            if(match && fileIds.indexOf(match[1]) === -1) fileIds.push(match[1]);
+        }
+
+        const startPDF = () => {
+            html2pdf().set(opt).from(element).save().then(function() {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                showToast("Exported to PDF successfully!", "bg-success");
+            });
+        };
+
+        // ถ้ารูปเยอะ ให้วิ่งไปดึงข้อมูลที่ Server ก่อน
+        if(fileIds.length > 0) {
+            google.script.run.withSuccessHandler(function(base64Data) {
+                for(var id in base64Data) {
+                    if(base64Data[id]) {
+                        var imgs = element.querySelectorAll('img[src*="id=' + id + '"]');
+                        imgs.forEach(img => img.src = base64Data[id]);
+                    }
+                }
+                startPDF();
+            }).getBase64FromDrive(fileIds);
+        } else {
+            startPDF();
+        }
+    }
+
+</script>

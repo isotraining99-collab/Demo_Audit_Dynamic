@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tinymce/6.8.3/tinymce.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <?!= include('Stylesheet'); ?>
+</head>
+<body>
+    <nav class="navbar navbar-custom py-3 px-4 mb-4">
+        <div class="container-fluid d-flex justify-content-between align-items-center"><span class="navbar-brand mb-0 h1 fw-bold text-corporate"><i class="bi bi-globe"></i> TS-BB(Audit) TEST</span></div>
+    </nav>
+    <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1080;">
+        <div id="statusToast" class="toast align-items-center text-white bg-dark border-0" role="alert"><div class="d-flex"><div class="toast-body fw-bold" id="toastMessage"><i class="bi bi-arrow-repeat spin"></i> Processing...</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div></div>
+    </div>
+
+    <div id="mainMenuPage" class="container">
+        <div class="text-center mb-5 mt-4"><h2 class="fw-bold text-corporate">01 Customer Audit</h2><p class="text-muted">Select module to access or create a new one</p></div>
+        <div id="menuGrid" class="row g-4 justify-content-center">
+            <div class="col-12 text-center py-5 text-muted"><i class="bi bi-arrow-repeat spin fs-1"></i><br>Loading Modules...</div>
+        </div>
+    </div>
+
+    <div id="dynamicModulePage" class="container-fluid px-4" style="display: none;">
+        <button class="btn btn-outline-secondary mb-3 rounded-2 fw-bold" onclick="goBackToMenu()"><i class="bi bi-arrow-left"></i> Back to Main Menu</button>
+        <div class="card mb-4 border-info">
+            <div class="card-header bg-info text-white d-flex justify-content-between align-items-center p-3 rounded-top">
+                <div><h5 class="mb-0 fw-bold" id="dynPageTitle"></h5></div>
+                <div><button class="btn btn-light btn-sm fw-bold text-info" onclick="openAddSessionModal(window.currentActiveSheet, '')"><i class="bi bi-file-earmark-plus"></i> Create New Document</button></div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table mb-0 align-middle">
+                        <thead class="table-custom text-center"><tr><th class="text-start ps-4" style="width: 45%;">Document Title (Nested Tree)</th><th style="width: 15%;">Status</th><th style="width: 20%;">Last Edit</th><th style="width: 20%;">Action</th></tr></thead>
+                        <tbody id="tableBody_Dynamic"><tr><td colspan="4" class="text-center py-5 text-muted"><i class="bi bi-arrow-repeat spin"></i> Loading data...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="addModuleModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-dark text-white"><h6 class="modal-title fw-bold"><i class="bi bi-plus-square"></i> Create New Module</h6><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <label class="form-label fw-bold small">Module Name (Sheet Name)</label>
+                    <input type="text" id="newModuleName" class="form-control mb-3" placeholder="e.g., 04_Quality Control">
+                    <label class="form-label fw-bold small">Select Icon</label>
+                    <select id="newModuleIcon" class="form-select mb-2">
+                        <option value="bi-file-earmark-text">📄 Document</option>
+                        <option value="bi-clipboard-check">📋 Audit Check</option>
+                        <option value="bi-gear-wide-connected">⚙️ Engineering</option>
+                        <option value="bi-shield-check">🛡️ Safety/Quality</option>
+                        <option value="bi-journal-bookmark">📔 Journal</option>
+                    </select>
+                </div>
+                <div class="modal-footer"><button type="button" id="btnCreateModule" class="btn btn-dark w-100 fw-bold" onclick="executeCreateModule()">Create Module</button></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="addSessionModal" tabindex="-1">
+        <div class="modal-dialog"><div class="modal-content">
+            <div class="modal-header bg-secondary text-white"><h6 class="modal-title fw-bold" id="addSessionTitle">New Session</h6><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <input type="hidden" id="sysMode">
+                <input type="hidden" id="sysParentId" value="">
+                
+                <label class="form-label fw-bold small">Contact Person / Reference</label>
+                <input type="text" id="sysContact" class="form-control mb-3" placeholder="e.g. John Doe">
+                
+                <label class="form-label fw-bold small text-info"><i class="bi bi-fonts"></i> Document Title</label>
+                <input type="text" id="sysDocTitle" class="form-control border-info" placeholder="e.g. Internal Audit Report (Oct)">
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="btnCreateSession" class="btn btn-primary w-100 fw-bold" onclick="executeCreateSession()">Create Document</button>
+            </div>
+        </div></div>
+    </div>
+
+    <div class="modal fade" id="editorModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog modal-xl-custom"><div class="modal-content">
+            <div class="modal-header bg-info text-white"><h5 class="modal-title fw-bold"><i class="bi bi-pencil-square"></i> Editing: <span id="editorDocTitleDisplay"></span></h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body bg-light"><input type="hidden" id="editDocAuditId"><input type="hidden" id="editDocMode"><div class="alert alert-warning py-2 small fw-bold"><i class="bi bi-info-circle"></i> Tip: You can insert tables, text, and copy-paste images directly.</div><textarea id="tinymce-editor"></textarea></div>
+            <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary fw-bold" data-bs-dismiss="modal">Cancel</button><button type="button" id="btnSaveRichDoc" class="btn btn-info text-white fw-bold px-5" onclick="saveRichDocument()"><i class="bi bi-save"></i> Save Document</button></div>
+        </div></div>
+    </div>
+
+<div class="modal fade" id="viewDocModal" tabindex="-1"><div class="modal-dialog modal-xl-custom"><div class="modal-content">
+  
+<div class="modal-header bg-dark text-white">
+            <h5 class="modal-title fw-bold"><i class="bi bi-file-text"></i> View Document</h5>
+            <div>
+                <button class="btn btn-sm btn-danger me-2 fw-bold" onclick="exportToPDF()"><i class="bi bi-file-pdf"></i> Export to PDF</button>
+                <button class="btn btn-sm btn-primary me-2 fw-bold" onclick="exportToWord()"><i class="bi bi-file-word"></i> Export to Word</button>
+                <button class="btn btn-sm btn-warning me-2 fw-bold" onclick="openEmailModal()"><i class="bi bi-envelope"></i> Send Email</button>                
+                <button class="btn-close btn-close-white ms-3" data-bs-dismiss="modal"></button>
+            </div>
+        </div>
+        <div class="modal-body bg-light"><div id="docViewer" class="doc-preview-box"></div></div>
+    </div></div></div>
+
+    <div class="modal fade" id="emailRecipientModal" tabindex="-1">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-header bg-warning text-dark"><h6 class="modal-title fw-bold"><i class="bi bi-send"></i> Send to Email</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <label class="form-label small fw-bold">Recipient Email</label>
+                    <input type="email" id="targetEmailInput" class="form-control" placeholder="example@minebea.co.th">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" id="btnConfirmSendEmail" class="btn btn-warning w-100 fw-bold" onclick="executeSendEmail()">Confirm Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <?!= include('JavaScript'); ?>
+</body>
+</html>

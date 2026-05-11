@@ -1,0 +1,59 @@
+<style>
+    /* 🌟 01 Customer Audit Theme: "MNB Corporate & Precision" */
+    /* จิตวิทยา: สีน้ำเงินองค์กร สื่อถึงความน่าเชื่อถือ เป็นทางการ และความเป็นวิศวกรรม */
+    body { background-color: #f0f2f5; font-family: 'Inter', 'Segoe UI', sans-serif; color: #2c3e50; }
+    
+    /* 🌟 Minebea Blue (สีหลักของบริษัท) */
+    .bg-corporate { background-color: #0033a0 !important; }
+    .text-corporate { color: #0033a0 !important; }
+    .border-corporate { border-color: #0033a0 !important; }
+    
+    .btn-corporate { background-color: #0033a0; color: white; border: none; border-radius: 4px; transition: background-color 0.2s, box-shadow 0.2s; font-weight: 500; }
+    .btn-corporate:hover { background-color: #002277; color: white; box-shadow: 0 4px 8px rgba(0, 51, 160, 0.25); transform: translateY(-1px); }
+    
+    .btn-outline-corporate { color: #0033a0; border: 1px solid #0033a0; background-color: transparent; border-radius: 4px; transition: 0.2s; font-weight: 500; }
+    .btn-outline-corporate:hover { color: #ffffff !important; background-color: #0033a0; box-shadow: 0 4px 8px rgba(0, 51, 160, 0.25); }
+
+    /* 🌟 Navbar & Cards (สไตล์ Industrial เน้นขอบคมชัด) */
+    .navbar-custom { background-color: #ffffff; border-bottom: 4px solid #0033a0; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+    .card { border: 1px solid #dee2e6; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.04); transition: transform 0.2s, box-shadow 0.2s; }
+    
+    /* 🌟 Menu Grid (ดีไซน์มีเส้นคาดด้านบน บ่งบอกโมดูล) */
+    .menu-card { cursor: pointer; border-top: 4px solid #adb5bd; border-left: 1px solid #dee2e6; border-right: 1px solid #dee2e6; border-bottom: 1px solid #dee2e6; }
+    .menu-card:hover { transform: translateY(-3px); border-top-color: #0033a0; box-shadow: 0 8px 15px rgba(0, 51, 160, 0.1); }
+    
+    .border-dashed { border: 2px dashed #ced4da !important; background-color: #f8f9fa; cursor: pointer; transition: 0.2s; border-radius: 4px; }
+    .border-dashed:hover { background-color: #e2e6ea; border-color: #0033a0 !important; }
+
+    /* 🌟 Table Design (เส้นชัดเจน อ่านข้อมูลไม่พลาดสายตา) */
+    .table-custom th { background-color: #e9ecef; color: #495057; font-weight: 700; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.5px; border-bottom: 3px solid #0033a0; }
+    
+    .row-document { background-color: #ffffff; border-bottom: 1px solid #e9ecef; transition: all 0.2s; }
+    
+    /* 🌟 Hover Effect: ล็อกสายตาด้วยเส้นทึบสีน้ำเงินซ้ายมือ ป้องกันการกวาดสายตาผิดบรรทัด */
+    .hover-highlight:hover { background-color: #f8fbff !important; border-left: 4px solid #0033a0; }
+
+    /* 🌟 Links & Icons */
+    .file-link { color: #0056b3; font-weight: 600; text-decoration: none; transition: 0.2s; background-color: #e6f0ff; padding: 2px 8px; border-radius: 4px; border: 1px solid #b3d4ff; }
+    .file-link:hover { background-color: #0033a0; color: #ffffff; border-color: #0033a0; }
+    .icon-large { font-size: 2.5rem; margin-bottom: 15px; color: #6c757d; transition: color 0.2s; }
+    .menu-card:hover .icon-large { color: #0033a0; }
+
+    /* 🌟 Document Preview Box (เหมือนแผ่นกระดาษจริง A4) */
+    .doc-preview-box { background-color: #fff; border: 1px solid #ccc; padding: 40px; border-radius: 2px; min-height: 400px; box-shadow: 3px 3px 10px rgba(0,0,0,0.05); }
+    .doc-preview-box table { border-collapse: collapse; width: 100%; margin-bottom: 15px; }
+    .doc-preview-box td, .doc-preview-box th { border: 1px solid #000; padding: 8px; vertical-align: top !important; }
+
+    /* 🌟 Utilities & Animations */
+    .spin { display: inline-block; animation: spin 1s linear infinite; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+    .modal-xl-custom { max-width: 95%; }
+    .modal-content { border-radius: 4px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); border: 1px solid #dee2e6; }
+    
+    /* 🌟 Action Buttons Hide/Show */
+    .btn-delete-module { position: absolute; top: 10px; right: 10px; z-index: 10; opacity: 0; transition: 0.2s; border-radius: 4px; }
+    .menu-card:hover .btn-delete-module { opacity: 1; transform: scale(1.05); }
+    
+    .hide-on-idle { opacity: 0; visibility: hidden; transition: opacity 0.2s ease-in-out; transform: translateX(5px); }
+    .row-document:hover .hide-on-idle { opacity: 1; visibility: visible; transform: translateX(0); }
+</style>
